@@ -243,11 +243,6 @@ function writeScalar(state: DumpState, value: string, level: number, isKey: bool
 // -- Core serialization --
 
 function writeNode(state: DumpState, value: unknown, level: number, block: boolean, compact: boolean, isKey: boolean): string | null {
-  // Apply replacer
-  if (state.replacer) {
-    value = state.replacer('', value);
-  }
-
   // Handle undefined
   if (value === undefined) {
     if (state.skipInvalid) return null;
@@ -334,7 +329,10 @@ function writeArray(state: DumpState, arr: unknown[], level: number, _block: boo
   if (useFlow) {
     // Flow style
     const sep = state.condenseFlow ? ',' : ', ';
-    const items = arr.map(item => {
+    const items = arr.map((item, idx) => {
+      if (state.replacer) {
+        item = state.replacer(String(idx), item);
+      }
       const s = writeNode(state, item, level + 1, false, false, false);
       return s ?? '';
     });
@@ -344,7 +342,11 @@ function writeArray(state: DumpState, arr: unknown[], level: number, _block: boo
     const indentStr = ' '.repeat(state.indent * level);
     const itemIndent = state.noArrayIndent ? '' : indentStr;
     const lines: string[] = [];
-    for (const item of arr) {
+    for (let idx = 0; idx < arr.length; idx++) {
+      let item: unknown = arr[idx];
+      if (state.replacer) {
+        item = state.replacer(String(idx), item);
+      }
       const s = writeNode(state, item, level + 1, true, false, false);
       if (s === null) {
         lines.push(itemIndent + '- null');
@@ -448,6 +450,11 @@ function writeObject(state: DumpState, obj: Record<string, unknown>, level: numb
 
 export function dump(input: unknown, options?: DumpOptions): string {
   const state = createState(options);
+
+  // Apply replacer to root value
+  if (state.replacer) {
+    input = state.replacer('', input);
+  }
 
   // Find duplicates for ref/anchor tracking
   if (!state.noRefs) {

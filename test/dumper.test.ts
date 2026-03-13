@@ -197,16 +197,30 @@ describe('dump — options', () => {
     expect(result).toContain('    b: 1');
   });
 
-  it('replacer transforms values', () => {
+  it('replacer transforms values exactly once', () => {
     const result = dump({ a: 1, b: 2 }, {
       replacer: (_key, value) => {
         if (typeof value === 'number') return value * 10;
         return value;
       },
     });
-    // The replacer is applied to the top-level value (the object)
-    // This is a simple test to ensure replacer is called
-    expect(result).toBeDefined();
+    // Replacer should multiply by 10, not 100 (double-apply bug)
+    expect(result).toContain('a: 10');
+    expect(result).toContain('b: 20');
+  });
+
+  it('replacer called with index for arrays', () => {
+    const keys: string[] = [];
+    dump([10, 20], {
+      replacer: (key, value) => {
+        keys.push(key);
+        return value;
+      },
+    });
+    // Root gets key '', array items get '0', '1'
+    expect(keys).toContain('');
+    expect(keys).toContain('0');
+    expect(keys).toContain('1');
   });
 });
 
