@@ -349,3 +349,124 @@ describe('dump — edge cases', () => {
     expect(load(result)).toEqual(data);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Bug fix regression tests (Task 289)
+// ---------------------------------------------------------------------------
+
+describe('dump — noCompatMode', () => {
+  it('quotes yes/no/on/off by default (compat mode)', () => {
+    for (const word of ['yes', 'no', 'on', 'off', 'y', 'n', 'YES', 'NO', 'On', 'Off']) {
+      const result = dump(word);
+      expect(result.trim().startsWith("'") || result.trim().startsWith('"')).toBe(true);
+      expect(load(result)).toBe(word);
+    }
+  });
+
+  it('does not quote yes/no/on/off with noCompatMode: true', () => {
+    const result = dump('yes', { noCompatMode: true });
+    expect(result).toBe('yes\n');
+  });
+});
+
+describe('dump — styles option', () => {
+  it('styles !!int hex produces hex output', () => {
+    const result = dump(255, { styles: { '!!int': 'hex' } });
+    expect(result.trim()).toBe('0xFF');
+  });
+
+  it('styles !!int binary', () => {
+    const result = dump(10, { styles: { '!!int': 'binary' } });
+    expect(result.trim()).toBe('0b1010');
+  });
+
+  it('styles !!int octal', () => {
+    const result = dump(8, { styles: { '!!int': 'octal' } });
+    expect(result.trim()).toBe('0o10');
+  });
+
+  it('styles with alias (16 -> hexadecimal)', () => {
+    const result = dump(255, { styles: { '!!int': '16' } });
+    expect(result.trim()).toBe('0xFF');
+  });
+});
+
+describe('dump — lineWidth folding', () => {
+  it('folds long plain strings', () => {
+    const longStr = 'the quick brown fox jumps over the lazy dog and keeps running across the meadow';
+    const result = dump(longStr, { lineWidth: 40 });
+    expect(result).toContain('>-');
+    expect(load(result)).toBe(longStr);
+  });
+
+  it('does not fold short strings', () => {
+    const result = dump('hello world', { lineWidth: 80 });
+    expect(result).toBe('hello world\n');
+  });
+
+  it('does not fold with lineWidth 0 (disabled)', () => {
+    const longStr = 'a '.repeat(100).trim();
+    const result = dump(longStr, { lineWidth: 0 });
+    expect(result).not.toContain('>-');
+  });
+});
+
+describe('dump — block scalar empty lines', () => {
+  it('does not indent empty lines in literal block', () => {
+    const value = 'line1\n\nline3\n';
+    const result = dump({ key: value });
+    // Empty line between line1 and line3 should be truly empty
+    const lines = result.split('\n');
+    const emptyLine = lines.find(l => l.match(/^\s+$/) && l.trim() === '');
+    expect(emptyLine).toBeUndefined();
+    expect(load(result)).toEqual({ key: value });
+  });
+
+  it('round-trips keep chomp with trailing empty lines', () => {
+    const value = 'a\nb\n\n\n';
+    const result = dump({ key: value });
+    expect(load(result)).toEqual({ key: value });
+  });
+});
+
+describe('dump — noArrayIndent', () => {
+  it('top-level array dashes align with key (column 0)', () => {
+    const result = dump({ items: [1, 2, 3] }, { noArrayIndent: true });
+    // noArrayIndent means dashes align with parent key level
+    // For top-level key, that's column 0
+    expect(result).toContain('items:\n- 1');
+    expect(load(result)).toEqual({ items: [1, 2, 3] });
+  });
+
+  it('nested array dashes align with parent key level', () => {
+    const result = dump({ outer: { items: [1, 2, 3] } }, { noArrayIndent: true });
+    // items is at level 1 (indent 2), so dashes should align at level 1
+    const lines = result.split('\n').filter(l => l.includes('- '));
+    for (const line of lines) {
+      expect(line.startsWith('  - ')).toBe(true);
+    }
+    expect(load(result)).toEqual({ outer: { items: [1, 2, 3] } });
+  });
+});
+
+describe('dump — multiline quoting', () => {
+  it('multiline string in flow mode uses double quotes with escapes', () => {
+    const result = dump({ key: 'line1\nline2' }, { flowLevel: 0 });
+    expect(result).toContain('\\n');
+    expect(load(result)).toEqual({ key: 'line1\nline2' });
+  });
+
+  it('multiline key uses double quotes with escapes', () => {
+    const result = dump({ 'key\nwith\nnewlines': 'value' });
+    expect(result).toContain('\\n');
+    expect(load(result)).toEqual({ 'key\nwith\nnewlines': 'value' });
+  });
+});
+
+describe('dump — flow-mode null for skipped items', () => {
+  it('emits null for skipped items in flow arrays', () => {
+    const result = dump([1, undefined, 3], { flowLevel: 0, skipInvalid: true });
+    expect(result).toContain('null');
+    expect(load(result)).toEqual([1, null, 3]);
+  });
+});

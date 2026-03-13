@@ -30,6 +30,7 @@ interface DumpState {
   sortKeys: boolean | ((a: string, b: string) => number);
   lineWidth: number;
   noRefs: boolean;
+  noCompatMode: boolean;
   condenseFlow: boolean;
   quotingType: "'" | '"';
   forceQuotes: boolean;
@@ -54,6 +55,7 @@ function createState(options?: DumpOptions): DumpState {
     sortKeys: options?.sortKeys ?? false,
     lineWidth: options?.lineWidth ?? 80,
     noRefs: options?.noRefs ?? false,
+    noCompatMode: options?.noCompatMode ?? false,
     condenseFlow: options?.condenseFlow ?? false,
     quotingType: options?.quotingType ?? "'",
     forceQuotes: options?.forceQuotes ?? false,
@@ -161,6 +163,11 @@ function needsQuoting(value: string): boolean {
   return false;
 }
 
+function needsCompatQuoting(value: string): boolean {
+  const lower = value.toLowerCase();
+  return lower === 'yes' || lower === 'no' || lower === 'on' || lower === 'off' || lower === 'y' || lower === 'n';
+}
+
 function needsDoubleQuoting(value: string): boolean {
   for (let i = 0; i < value.length; i++) {
     const ch = value.charCodeAt(i);
@@ -190,13 +197,31 @@ function hasMultipleLines(value: string): boolean {
   return value.indexOf('\n') !== -1;
 }
 
+function foldLine(value: string, width: number): string[] {
+  const lines: string[] = [];
+  let remaining = value;
+  while (remaining.length > width) {
+    let breakAt = remaining.lastIndexOf(' ', width);
+    if (breakAt <= 0) {
+      breakAt = remaining.indexOf(' ', width);
+      if (breakAt === -1) break;
+    }
+    lines.push(remaining.substring(0, breakAt));
+    remaining = remaining.substring(breakAt + 1);
+  }
+  if (remaining) lines.push(remaining);
+  return lines;
+}
+
 function writeScalar(state: DumpState, value: string, level: number, isKey: boolean): string {
   if (value.length === 0) {
     return state.quotingType === '"' ? '""' : "''";
   }
 
+  const canBlock = !isKey && level >= 0 && (state.flowLevel < 0 || level < state.flowLevel);
+
   // Block scalars for multiline (not in flow, not for keys)
-  if (!isKey && level >= 0 && hasMultipleLines(value) && (state.flowLevel < 0 || level < state.flowLevel)) {
+  if (canBlock && hasMultipleLines(value)) {
     // Use literal block scalar
     const indentStr = ' '.repeat(state.indent);
     const prefix = ' '.repeat(state.indent * level);
@@ -225,12 +250,26 @@ function writeScalar(state: DumpState, value: string, level: number, isKey: bool
     }
 
     const lines = body.split('\n');
-    const indented = lines.map(l => prefix + indentStr + l).join('\n');
+    const indented = lines.map(l => l === '' ? '' : prefix + indentStr + l).join('\n');
     return '|' + chomp + '\n' + indented + '\n';
   }
 
-  if (state.forceQuotes || needsQuoting(value)) {
-    if (needsDoubleQuoting(value) || state.quotingType === '"') {
+  // Folded block scalar for long non-multiline strings
+  if (canBlock && state.lineWidth > 0 && value.length > state.lineWidth
+      && !needsQuoting(value) && !(!state.noCompatMode && needsCompatQuoting(value))) {
+    const indentSize = state.indent * (level + 1);
+    const effectiveWidth = Math.max(20, state.lineWidth - indentSize);
+    const foldedLines = foldLine(value, effectiveWidth);
+    if (foldedLines.length > 1) {
+      const prefix = ' '.repeat(state.indent * level);
+      const indentStr = ' '.repeat(state.indent);
+      const indented = foldedLines.map(l => prefix + indentStr + l).join('\n');
+      return '>-\n' + indented + '\n';
+    }
+  }
+
+  if (state.forceQuotes || needsQuoting(value) || (!state.noCompatMode && needsCompatQuoting(value))) {
+    if (needsDoubleQuoting(value) || state.quotingType === '"' || hasMultipleLines(value)) {
       return '"' + escapeDoubleQuoted(value) + '"';
     }
     // Single-quoted
@@ -238,6 +277,43 @@ function writeScalar(state: DumpState, value: string, level: number, isKey: bool
   }
 
   return value;
+}
+
+// -- Style overrides via schema types --
+
+function representWithType(state: DumpState, value: unknown): string | null {
+  if (Object.keys(state.styles).length === 0) return null;
+
+  const types = state.schema.compiledImplicit;
+  for (const type of types) {
+    let matches = false;
+    if (type.predicate) {
+      matches = type.predicate(value);
+    } else if (type.instanceOf) {
+      matches = value instanceof (type.instanceOf as new (...args: unknown[]) => unknown);
+    }
+
+    if (!matches || !type.represent) continue;
+
+    // Get short tag: tag:yaml.org,2002:int -> !!int
+    const shortTag = '!!' + type.tag.replace('tag:yaml.org,2002:', '');
+    const rawStyle = state.styles[shortTag] ?? state.styles[type.tag];
+    if (rawStyle === undefined) continue;
+
+    // Resolve through style aliases
+    const style = type.styleAliases[rawStyle] ?? rawStyle;
+
+    if (typeof type.represent === 'function') {
+      return type.represent(value, style);
+    }
+    if (style in type.represent) {
+      return type.represent[style](value);
+    }
+
+    return null;
+  }
+
+  return null;
 }
 
 // -- Core serialization --
@@ -270,6 +346,10 @@ function writeNode(state: DumpState, value: unknown, level: number, block: boole
       state.usedDuplicates.add(value);
     }
   }
+
+  // Check for style overrides via schema types
+  const styled = representWithType(state, value);
+  if (styled !== null) return styled;
 
   // Handle primitives directly (before detectType to avoid re-quoting)
   if (value === null) return 'null';
@@ -334,13 +414,13 @@ function writeArray(state: DumpState, arr: unknown[], level: number, _block: boo
         item = state.replacer(String(idx), item);
       }
       const s = writeNode(state, item, level + 1, false, false, false);
-      return s ?? '';
+      return s ?? 'null';
     });
     result = prefix + '[' + items.join(sep) + ']';
   } else {
     // Block style
     const indentStr = ' '.repeat(state.indent * level);
-    const itemIndent = state.noArrayIndent ? '' : indentStr;
+    const itemIndent = state.noArrayIndent ? ' '.repeat(state.indent * Math.max(0, level - 1)) : indentStr;
     const lines: string[] = [];
     for (let idx = 0; idx < arr.length; idx++) {
       let item: unknown = arr[idx];
