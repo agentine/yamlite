@@ -851,11 +851,14 @@ export class Scanner {
     }
 
     // Apply chomping
-    if (chomping !== -1) {
+    if (chomping === -1) {
+      // strip — no trailing newlines
+    } else if (chomping === 1) {
+      // keep — preserve all trailing line breaks
+      chunks.push(trailingBreaks || '\n');
+    } else {
+      // clip (default) — single trailing newline
       chunks.push('\n');
-    }
-    if (chomping === 1) {
-      chunks.push(trailingBreaks);
     }
 
     return chunks.join('');
@@ -1024,7 +1027,7 @@ export class Scanner {
       while (ch !== 0) {
         if (ch === CHAR_COLON) {
           const after = this.peek(1);
-          if (isWhiteSpaceOrEOL(after) || (this.flowLevel !== 0 && isFlowIndicator(after))) break;
+          if (isWhiteSpaceOrEOL(after) || after === 0 || (this.flowLevel !== 0 && isFlowIndicator(after))) break;
         }
         if (this.flowLevel !== 0 && isFlowIndicator(ch)) break;
         if (isWhiteSpaceOrEOL(ch)) break;
@@ -1046,7 +1049,27 @@ export class Scanner {
       }
       if (text) chunks.push(text);
 
-      // Check for line break
+      // Handle whitespace between words
+      ch = this.peek();
+      if (ch === 0) break;
+
+      if (isWhiteSpace(ch) && !isEOL(ch)) {
+        // Inline spaces — collect them
+        spaces = '';
+        while (isWhiteSpace(this.peek()) && !isEOL(this.peek()) && this.peek() !== 0) {
+          spaces += ' ';
+          this.forward();
+        }
+        // After spaces: check what follows
+        const afterSpaces = this.peek();
+        if (afterSpaces === 0 || afterSpaces === CHAR_SHARP) break;
+        if (!isEOL(afterSpaces)) {
+          // More content after spaces — continue outer loop
+          continue;
+        }
+        // EOL after spaces — fall through to line break handling
+      }
+
       if (!isEOL(this.peek())) break;
 
       const lineBreak = this.scanLineBreak();
