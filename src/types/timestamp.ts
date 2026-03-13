@@ -37,8 +37,8 @@ export const timestamp = new Type('tag:yaml.org,2002:timestamp', {
 
     let delta = 0;
     if (match[8]) {
-      delta = +match[8] * 60;
-      if (match[9]) delta += (delta > 0 ? +match[9] : -+match[9]);
+      const sign = match[8].startsWith('-') ? -1 : 1;
+      delta = sign * (Math.abs(+match[8]) * 60 + (match[9] ? +match[9] : 0));
       delta *= -60000; // convert to ms offset
     }
 

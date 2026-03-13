@@ -1,7 +1,7 @@
 import { Type } from '../type.js';
 
 const YAML_FLOAT_PATTERN =
-  /^[-+]?(?:\.[0-9]+|[0-9]+(?:\.[0-9]*)?)(?:[eE][-+]?[0-9]+)?$|^[-+]?\.(?:inf|Inf|INF)$|^\.(?:nan|NaN|NAN)$/;
+  /^[-+]?(?:\.[0-9]+|[0-9]+\.[0-9]*)(?:[eE][-+]?[0-9]+)?$|^[-+]?\.(?:inf|Inf|INF)$|^\.(?:nan|NaN|NAN)$/;
 
 export const float = new Type('tag:yaml.org,2002:float', {
   kind: 'scalar',
@@ -10,7 +10,7 @@ export const float = new Type('tag:yaml.org,2002:float', {
     return YAML_FLOAT_PATTERN.test(String(data));
   },
   construct: (data) => {
-    let value = String(data).replace(/_/g, '').toLowerCase();
+    const value = String(data).toLowerCase();
 
     if (value === '.inf' || value === '+.inf') return Infinity;
     if (value === '-.inf') return -Infinity;
@@ -19,7 +19,7 @@ export const float = new Type('tag:yaml.org,2002:float', {
   },
   predicate: (data) =>
     typeof data === 'number' &&
-    (data % 1 !== 0 || data === Infinity || data === -Infinity || Number.isNaN(data)),
+    (data % 1 !== 0 || data === Infinity || data === -Infinity || Number.isNaN(data) || Object.is(data, -0)),
   represent: (data, style) => {
     const value = data as number;
     if (isNaN(value)) return '.nan';

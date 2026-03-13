@@ -1,6 +1,6 @@
 import { Type } from '../type.js';
 
-const YAML_INTEGER_PATTERN = /^[-+]?(?:0b[01_]+|0o[0-7_]+|0x[0-9a-fA-F_]+|[0-9][0-9_]*)$/;
+const YAML_INTEGER_PATTERN = /^[-+]?(?:0b[01]+|0o[0-7]+|0x[0-9a-fA-F]+|[0-9]+)$/;
 
 export const int = new Type('tag:yaml.org,2002:int', {
   kind: 'scalar',
@@ -9,7 +9,7 @@ export const int = new Type('tag:yaml.org,2002:int', {
     return YAML_INTEGER_PATTERN.test(String(data));
   },
   construct: (data) => {
-    let value = String(data).replace(/_/g, '');
+    let value = String(data);
 
     if (value.startsWith('0b') || value.startsWith('-0b') || value.startsWith('+0b')) {
       const sign = value.startsWith('-') ? -1 : 1;
@@ -26,7 +26,7 @@ export const int = new Type('tag:yaml.org,2002:int', {
     }
     return parseInt(value, 10);
   },
-  predicate: (data) => typeof data === 'number' && Number.isInteger(data) && !isNaN(data),
+  predicate: (data) => typeof data === 'number' && Number.isInteger(data) && !isNaN(data) && !Object.is(data, -0),
   represent: {
     binary: (data) => (data as number) >= 0
       ? '0b' + (data as number).toString(2)
