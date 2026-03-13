@@ -1,6 +1,6 @@
 import { Type } from '../type.js';
 
-const YAML_INTEGER_PATTERN = /^[-+]?(?:0b[01]+|0o[0-7]+|0x[0-9a-fA-F]+|[0-9]+)$/;
+const YAML_INTEGER_PATTERN = /^[-+]?(?:0b[01]+|0o[0-7]+|0x[0-9a-fA-F]+|0[0-7]+|0|[1-9][0-9]*)$/;
 
 export const int = new Type('tag:yaml.org,2002:int', {
   kind: 'scalar',
@@ -23,6 +23,12 @@ export const int = new Type('tag:yaml.org,2002:int', {
     }
     if (value.startsWith('0x') || value.startsWith('-0x') || value.startsWith('+0x')) {
       return parseInt(value, 16);
+    }
+    // Old-style octal: 010 = 8 (YAML 1.1 compat, same as js-yaml v4)
+    const stripped = value.replace(/^[+-]/, '');
+    if (stripped.length > 1 && stripped.startsWith('0') && /^[0-7]+$/.test(stripped)) {
+      const sign = value.startsWith('-') ? -1 : 1;
+      return sign * parseInt(stripped, 8);
     }
     return parseInt(value, 10);
   },

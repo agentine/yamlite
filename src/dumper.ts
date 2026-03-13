@@ -358,6 +358,7 @@ function writeNode(state: DumpState, value: unknown, level: number, block: boole
     if (Number.isNaN(value)) return '.nan';
     if (value === Infinity) return '.inf';
     if (value === -Infinity) return '-.inf';
+    if (Object.is(value, -0)) return '-0.0';
     return String(value);
   }
   if (typeof value === 'string') return writeScalar(state, value, level, isKey);

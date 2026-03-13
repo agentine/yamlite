@@ -49,6 +49,15 @@ describe('dump — scalars', () => {
     expect(dump(-Infinity)).toBe('-.inf\n');
   });
 
+  it('negative zero', () => {
+    expect(dump(-0)).toBe('-0.0\n');
+  });
+
+  it('negative zero round-trip', () => {
+    const result = load(dump(-0));
+    expect(Object.is(result, -0)).toBe(true);
+  });
+
   it('empty string gets quoted', () => {
     const result = dump('');
     expect(result === "''\n" || result === '""\n').toBe(true);

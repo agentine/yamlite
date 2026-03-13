@@ -70,6 +70,25 @@ describe('load — scalars', () => {
     expect(load('0b1010')).toBe(10);
   });
 
+  it('old-style octal 010 = 8', () => {
+    expect(load('010')).toBe(8);
+  });
+
+  it('old-style octal 0777 = 511', () => {
+    expect(load('0777')).toBe(511);
+  });
+
+  it('decimal does not have leading zeros', () => {
+    // 09 is NOT valid octal, and not a valid old-style octal
+    // js-yaml parses 09 as string since it's invalid
+    expect(load('0')).toBe(0);
+    expect(load('10')).toBe(10);
+  });
+
+  it('negative zero', () => {
+    expect(Object.is(load('-0.0'), -0)).toBe(true);
+  });
+
   it('.inf', () => {
     expect(load('.inf')).toBe(Infinity);
   });
