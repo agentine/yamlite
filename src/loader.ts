@@ -11,6 +11,8 @@ export interface LoadOptions {
   onWarning?: (warning: YAMLException) => void;
   json?: boolean;
   listener?: (eventType: 'open' | 'close', state: object) => void;
+  maxDepth?: number;
+  maxAliases?: number;
 }
 
 interface LoaderState {
@@ -25,6 +27,10 @@ interface LoaderState {
   anchorMap: Record<string, unknown>;
   tagDirectives: Array<{ handle: string; prefix: string }>;
   version: [number, number] | null;
+  depth: number;
+  maxDepth: number;
+  aliasCount: number;
+  maxAliases: number;
 }
 
 const FAILSAFE_TAGS: Record<string, string> = {
@@ -50,6 +56,10 @@ function createState(input: string, options?: LoadOptions): LoaderState {
     anchorMap: Object.create(null),
     tagDirectives: [...DEFAULT_TAG_PREFIXES],
     version: null,
+    depth: 0,
+    maxDepth: options?.maxDepth ?? 1000,
+    aliasCount: 0,
+    maxAliases: options?.maxAliases ?? 100,
   };
 }
 
@@ -166,8 +176,11 @@ function parseDocument(state: LoaderState): unknown {
   state.anchorMap = Object.create(null);
   state.tagDirectives = [...DEFAULT_TAG_PREFIXES];
   state.version = null;
+  state.depth = 0;
+  state.aliasCount = 0;
 
   // Process directives
+  const userTagHandles = new Set<string>();
   while (peekTokenType(state) === 'DIRECTIVE') {
     const tok = state.scanner.getToken()!;
     if (tok.value === 'YAML') {
@@ -181,15 +194,21 @@ function parseDocument(state: LoaderState): unknown {
     } else if (tok.value === 'TAG') {
       const handle = tok.handle!;
       const prefix = tok.prefix!;
-      // Check for duplicate tag handles
+      // Check for duplicate user TAG directive
+      if (userTagHandles.has(handle)) {
+        throwError(state, `duplicate %TAG directive "${handle}"`, tok.startMark);
+      }
+      userTagHandles.add(handle);
+      // Update existing default or add new
+      let found = false;
       for (const existing of state.tagDirectives) {
         if (existing.handle === handle) {
           existing.prefix = prefix;
+          found = true;
           break;
         }
       }
-      // Add if not existing
-      if (!state.tagDirectives.find(td => td.handle === handle)) {
+      if (!found) {
         state.tagDirectives.push({ handle, prefix });
       }
     }
@@ -218,6 +237,12 @@ function parseDocument(state: LoaderState): unknown {
 }
 
 function parseNode(state: LoaderState, _block: boolean, indentlessSequence: boolean): unknown {
+  state.depth++;
+  if (state.depth > state.maxDepth) {
+    throwError(state, `maximum nesting depth exceeded (${state.maxDepth})`);
+  }
+
+  try {
   let anchor: string | null = null;
   let tag: string | null = null;
   let tagMark: Mark | undefined;
@@ -230,6 +255,10 @@ function parseNode(state: LoaderState, _block: boolean, indentlessSequence: bool
     const name = tok.value!;
     if (!(name in state.anchorMap)) {
       throwError(state, `unidentified alias "${name}"`, tok.startMark);
+    }
+    state.aliasCount++;
+    if (state.aliasCount > state.maxAliases) {
+      throwError(state, `maximum number of alias dereferences exceeded (${state.maxAliases})`, tok.startMark);
     }
     return state.anchorMap[name];
   }
@@ -303,6 +332,9 @@ function parseNode(state: LoaderState, _block: boolean, indentlessSequence: bool
   }
 
   return result;
+  } finally {
+    state.depth--;
+  }
 }
 
 function parseScalar(state: LoaderState, tag: string | null, tagMark?: Mark): unknown {
@@ -599,7 +631,7 @@ export function loadAll(
   input: string,
   iteratorOrOptions?: ((doc: unknown) => void) | LoadOptions,
   options?: LoadOptions,
-): unknown[] {
+): unknown[] | void {
   if (typeof input !== 'string') {
     throwSimple('input must be a string');
   }
@@ -623,7 +655,7 @@ export function loadAll(
     for (const doc of documents) {
       iterator(doc);
     }
-    return [];
+    return;
   }
 
   return documents;

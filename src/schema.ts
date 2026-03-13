@@ -33,7 +33,7 @@ export class Schema {
     this.compiledExplicit = allExplicit;
 
     // Build tag → type lookup map.
-    this.compiledTypeMap = {};
+    this.compiledTypeMap = Object.create(null) as Record<string, Type>;
     for (const type of [...this.compiledImplicit, ...this.compiledExplicit]) {
       this.compiledTypeMap[type.tag] = type;
     }

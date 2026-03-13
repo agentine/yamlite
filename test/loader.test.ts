@@ -282,7 +282,7 @@ describe('loadAll', () => {
   it('with iterator callback', () => {
     const docs: unknown[] = [];
     const result = loadAll('---\n1\n---\n2', (doc) => docs.push(doc));
-    expect(result).toEqual([]);
+    expect(result).toBeUndefined();
     expect(docs).toEqual([1, 2]);
   });
 
@@ -523,5 +523,71 @@ jobs:
     const test = jobs.test as Record<string, unknown>;
     expect(test['runs-on']).toBe('ubuntu-latest');
     expect((test.steps as unknown[]).length).toBe(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Bug fix regression tests (Task 290)
+// ---------------------------------------------------------------------------
+
+describe('load — security hardening', () => {
+  it('prototype pollution: compiledTypeMap does not inherit Object.prototype', () => {
+    // Before fix: compiledTypeMap['constructor'] returned Object.prototype.constructor
+    // and calling .resolve() on it would crash. Now it throws a proper "unknown tag" error.
+    expect(() => load('!<constructor> test')).toThrow(/unknown tag/);
+  });
+
+  it('duplicate TAG directive throws', () => {
+    const yaml = `%TAG !! tag:yaml.org,2002:\n%TAG !! tag:example.com:\n---\nfoo: bar`;
+    expect(() => load(yaml)).toThrow(/duplicate %TAG/);
+  });
+
+  it('single TAG directive works', () => {
+    const yaml = `%TAG !! tag:yaml.org,2002:\n---\nfoo: bar`;
+    expect(load(yaml)).toEqual({ foo: 'bar' });
+  });
+
+  it('depth limit throws on deeply nested YAML', () => {
+    // Create deeply nested mapping: a:\n  a:\n    a: ...
+    let yaml = '';
+    for (let i = 0; i < 50; i++) {
+      yaml += ' '.repeat(i * 2) + 'a:\n';
+    }
+    yaml += ' '.repeat(50 * 2) + 'end';
+    // Default maxDepth=1000, this should be fine
+    expect(() => load(yaml)).not.toThrow();
+
+    // But with a very low maxDepth, it should throw
+    expect(() => load(yaml, { maxDepth: 10 })).toThrow(/maximum nesting depth/);
+  });
+
+  it('alias expansion limit throws on billion laughs', () => {
+    // Create a chain of aliases that expands exponentially
+    let yaml = '---\n';
+    yaml += 'a: &a [x, x]\n';
+    for (let i = 1; i <= 20; i++) {
+      yaml += `b${i}: &b${i} [*a, *a]\n`;
+    }
+    // With maxAliases=5, should throw before expanding too many
+    expect(() => load(yaml, { maxAliases: 5 })).toThrow(/maximum number of alias/);
+  });
+
+  it('alias expansion within default limit works', () => {
+    const yaml = `a: &a 1\nb: *a\nc: *a`;
+    expect(load(yaml)).toEqual({ a: 1, b: 1, c: 1 });
+  });
+});
+
+describe('loadAll — return type', () => {
+  it('returns void when called with iterator', () => {
+    const docs: unknown[] = [];
+    const result = loadAll('---\n1\n---\n2', (doc) => docs.push(doc));
+    expect(result).toBeUndefined();
+    expect(docs).toEqual([1, 2]);
+  });
+
+  it('returns array when called without iterator', () => {
+    const result = loadAll('---\n1\n---\n2');
+    expect(result).toEqual([1, 2]);
   });
 });
